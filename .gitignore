@@ -45,3 +45,13 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Locally-owned copyrighted audio files, used only for local librosa feature extraction.
+# Never committed — this is personal-use source audio, not something to redistribute
+# through a public repo, regardless of how it was legally obtained.
+OR-3/
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.aac
