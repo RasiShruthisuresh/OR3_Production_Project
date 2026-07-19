@@ -12,8 +12,9 @@ than assuming a clean API exists.
 
 ## The pipeline, step by step
 
-**1. Data ingestion.** Five independent sources feed the pipeline, each wrapped behind its own
-small class so any one of them can be swapped out later without touching the rest of the code:
+**1. Data ingestion.** Six independent sources feed the pipeline, each wrapped behind its own
+small class/function so any one of them can be swapped out later without touching the rest of
+the code:
 
 - **Track identity** (names, track order, duration, bonus-track flags) comes from Wikipedia,
   hand-verified against each album's page, rather than Spotify's catalog — explained below.
@@ -27,8 +28,12 @@ small class so any one of them can be swapped out later without touching the res
   testing found its endpoint sits behind Cloudflare bot protection that blocks plain server-side
   requests regardless of API key validity, so it currently contributes nothing; the code detects
   this in one request and stops trying, rather than hammering a dead end.
-- **Everything ReccoBeats and GetSongBPM don't cover** — currently all 14 tracks of the 2026
-  album — is a manual-entry template, the guaranteed-to-work fallback once free options run out.
+- **The 2026 album's audio features are computed locally via `librosa`** from personally-owned
+  audio files (12 of its 14 tracks) — every free lookup source was exhausted first (Spotify dead,
+  ReccoBeats' catalog predates the album, GetSongBPM/Tunebat/Chosic all confirmed Cloudflare-
+  blocked on their actual data pages). See "OR3 methodology" below for what this changes.
+- **Whatever none of the above covers** — 2 OR3 tracks with no audio file yet — is a manual-entry
+  template, the last-resort fallback once every automated option is exhausted.
 - **Chart performance** (Billboard Hot 100 peak positions for each album's singles) is compiled
   by hand from Billboard/Wikipedia coverage, the same standard a published article would cite to.
 
@@ -79,29 +84,82 @@ predict, printing the actual track names and numbers rather than a vague summary
   → #11 (Get Him Back!). *you seem pretty sad for a girl so in love* broke that pattern and looked
   more like SOUR: #1 (Drop Dead) → #5 (The Cure) → #3 (Stupid Song).
 
-**What isn't available yet, and why:** the 2026 album's 14 tracks have zero audio-feature
-coverage (0/14), and Spotify popularity is 0/42 across the board. Not an oversight —
-**no free, complete, programmatic source for 2026-album audio features exists** as of this
-writing (Spotify's endpoint is dead for any new app; GetSongBPM is Cloudflare-blocked; ReccoBeats'
-catalog necessarily predates this album; no Kaggle dataset could possibly contain it either), and
-popularity is simply pending `SPOTIFY_CLIENT_ID`/`SECRET` being added to `.env`.
+**OR3 (the 2026 album), computed via `librosa` from 12 of 14 tracks — a different methodology,
+see the caveat below:**
 
-**To complete the picture** (the 2026 album's place in these trends, real popularity
-correlations, and the counterintuitive polish-vs-popularity check, which needs both audio features
-and popularity together): fill in the 2026 album's manual columns in `/data/raw/..._raw.csv` using
-a per-track lookup tool (the `notes` column documents this), add Spotify credentials to `.env`,
-and re-run Sections 2–4. Nothing above was estimated or invented to look more complete than the
-data actually is — every number here came out of the notebook exactly as printed.
+- **Tempo sits between SOUR and GUTS, not a continuation of GUTS' slowdown**: mean 134.2 BPM
+  across the 12 known OR3 tracks, vs. 141.5 (SOUR) and 128.6 (GUTS). Whatever this album is doing,
+  it's not simply extending the tempo trend from the first two.
+- **Widest tempo range of any album**: from 83.4 BPM ("Cigarette Smoke," the 5:40 closer) to
+  161.5 BPM ("Maggots for Brains") — a wider spread than either SOUR or GUTS individually show.
+- **"Cigarette Smoke" is the outlier on every axis**: slowest tempo (83.4 BPM), lowest RMS energy
+  (0.140) and lowest zero-crossing rate of the batch, consistent with being the album's slow,
+  dynamically expressive closer.
+- **Key detection validated independently before running the full batch**: for "Drop Dead," this
+  pipeline computed 129.20 BPM and G# Major — against an external claimed reference of 130 BPM
+  and G#/A♭ Major (the same pitch class), a near-exact match arrived at without any tuning to fit
+  it. Full detail in the notebook's Section 1.7.
+
+**What still isn't available, and why:** 2 of the 2026 album's tracks ("Less," "Never Do") have no
+audio file yet and stay pending manual entry, and Spotify popularity is 0/42 across the board —
+simply pending `SPOTIFY_CLIENT_ID`/`SECRET` being added to `.env`. Not an oversight in either
+case: no free, complete, programmatic source for 2026-album audio features has ever existed
+(confirmed live at every turn — Spotify's endpoint is dead for any new app, ReccoBeats' catalog
+necessarily predates this album, GetSongBPM/Tunebat/Chosic are all Cloudflare-blocked), which is
+exactly why librosa became the fallback for the tracks that do have audio available.
+
+**To complete the picture** (the last 2 OR3 tracks, real popularity correlations, and the
+counterintuitive polish-vs-popularity check, which needs both audio features and popularity
+together): add their audio files or manual entries, add Spotify credentials to `.env`, and re-run
+Sections 2–4. Nothing above was estimated or invented to look more complete than the data actually
+is — every number here came out of the notebook exactly as printed.
+
+## OR3 methodology: why it isn't directly comparable to SOUR/GUTS
+
+The 2026 album's audio features come from `librosa`, an open-source signal-processing toolkit,
+run locally against personally-owned audio files — not from any API, and not the same kind of
+measurement as SOUR/GUTS' Spotify/ReccoBeats-sourced features:
+
+- **Spotify/ReccoBeats' features are outputs of a proprietary ML model** — `energy`, `valence`,
+  `danceability`, etc. are trained scores normalized to 0–1 across Spotify's whole catalog.
+- **librosa's outputs are raw DSP measurements** — RMS energy, spectral centroid/bandwidth/
+  rolloff, zero-crossing rate, a dynamic-range proxy, and a beat-strength proxy — with no trained
+  model behind them, and critically, **no equivalent to valence or danceability at all**, since
+  those require a perceptual model, not just signal statistics.
+
+Because of that, OR3's librosa output lives in its own `librosa_`-prefixed columns in
+`tracks_clean.csv` rather than overwriting `energy`/`valence`/`danceability`/etc. — putting a raw
+DSP number in the same column as an ML-trained score would silently conflate two different kinds
+of measurement. The **one exception is `tempo`**: BPM is an objectively measurable physical
+quantity regardless of who detects it, so OR3's librosa-detected tempo does populate the shared
+`tempo` column — but every chart/table using it says so explicitly, since it's still a different
+detection algorithm than whatever ReccoBeats uses upstream of Spotify.
+
+**Practical effect on the charts in Sections 3–4**: OR3 correctly shows as having no data for
+`energy`/`valence`/`acousticness`/etc. — not because entry is incomplete, but because those
+specific ML-trained quantities were never computed for it and there's no honest way to synthesize
+them from DSP measurements alone.
+
+**Validated once before running the full batch**, per standard practice: this pipeline's
+independently-computed tempo/key for "Drop Dead" (129.20 BPM, G# Major) landed almost exactly on
+an external reference value (130 BPM, G#/A♭ Major) without any adjustment made to force the match
+— reported as a genuine cross-check, not proof of anything beyond that one track.
+
+**A note on the source audio**: the MP3 files used for extraction are not included in this
+repository (`.gitignore` excludes them) — they're personally-owned copies of recently-released,
+actively-commercial music, used only for local feature extraction, never redistributed.
 
 ## Data limitations and caveats
 
+- **OR3's audio features are not comparable in kind to SOUR/GUTS' features** — see the dedicated
+  section above. This is the single most important caveat for reading the findings above correctly.
 - **SOUR/GUTS audio features come from ReccoBeats, not Spotify's own now-inaccessible pipeline.**
   Its response includes an ISRC and a live popularity figure matching Spotify's own, so this data
   clearly derives from Spotify in some way; ReccoBeats' public docs don't state whether it's
   independently computed or a cached mirror, or spell out redistribution terms. Persisting it to
   `/data/raw` was a deliberate decision made with that provenance uncertainty acknowledged.
-- **The 2026 album's audio features remain fully manual** once filled in, sourced from third-party
-  estimation tools (e.g. tunebat.com, chosic.com) rather than any original analysis pipeline.
+- **The 2 remaining OR3 tracks without an audio file** ("Less," "Never Do") will need either an
+  audio file (for librosa) or third-party manual lookup (tunebat.com, chosic.com) once available.
 - **Spotify popularity is a moving target, not a fixed dataset.** It's fetched live at request
   time and stamped with a `fetched_on` date; re-running the notebook later will very likely return
   different numbers, since Spotify's popularity score is recency-weighted by design.
@@ -148,14 +206,20 @@ pip install -r requirements.txt
   currently has no effect, but the code will pick it up automatically if that changes.
 - **No key needed for ReccoBeats** — it's called directly, no registration required.
 
+**For OR3's librosa extraction**: place personally-owned audio files for the 2026 album in
+`OR-3/` at the project root, named `olivia-rodrigo-<track-slug>.mp3` (see Section 1.7's
+`OR3_FILENAME_TO_TITLE` map in the notebook for exact expected filenames). This folder is
+gitignored and not part of the repository — it has to be supplied locally.
+
 **Running it:**
 
 1. `jupyter notebook notebooks/data_engineering_olivia_rodrigo.ipynb`, then run all cells top to
    bottom — each of the four sections can also be re-run independently once `/data/raw` exists.
-2. To add the 2026 album's audio-feature data: open its `_raw.csv`, look up each track on a tool
-   like tunebat.com or chosic.com, fill in the blank columns, save, then re-run Sections 2 through 4.
+2. To add the 2 remaining OR3 tracks: either add their audio files to `OR-3/` and re-run Section
+   1.7, or look them up manually on tunebat.com/chosic.com and fill in their `_raw.csv` row.
 3. Outputs: `/data/raw/*.csv` (one per album, plus `chart_peaks.csv`),
-   `/data/processed/tracks_clean.csv`, and every chart/statistic rendered inline in the notebook.
+   `/data/processed/tracks_clean.csv` and `or3_audio_features_computed.csv`, and every
+   chart/statistic rendered inline in the notebook.
 
 ## Data sources
 
@@ -165,7 +229,9 @@ pip install -r requirements.txt
 - Tempo/key (fallback): [GetSongBPM](https://getsongbpm.com) (currently blocked — see caveats)
 - Spotify track IDs (fallback, no credentials needed): [kworb.net](https://kworb.net)
 - Chart positions: compiled from Billboard/Wikipedia coverage
-- 2026 album's audio features: manually compiled (see notebook Section 1.5 for methodology)
+- OR3 (2026 album) audio features: computed locally via [librosa](https://librosa.org) from
+  personally-owned audio (see "OR3 methodology" above and notebook Section 1.7)
+- Remaining OR3 tracks without an audio file: manually compiled (see notebook Section 1.5)
 
 ## Acknowledgments
 
